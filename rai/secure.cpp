@@ -219,8 +219,26 @@ rai::keypair::keypair (std::string const & prv_a)
 
 rai::ledger::ledger (rai::block_store & store_a, rai::uint128_t const & inactive_supply_a) :
 store (store_a),
-inactive_supply (inactive_supply_a)
+inactive_supply (inactive_supply_a),
+check_bootstrap_weights (true)
 {
+	if (rai::rai_network == rai::rai_networks::rai_live_network)
+	{
+		// TODO - this should be a more exhaustive set.
+		// Updated 1-28-18
+		bootstrap_weight_max_blocks = 4000000;
+		bootstrap_weights[rai::account("2399A083C600AA0572F5E36247D978FCFC840405F8D4B6D33161C0066A55F431")] = rai::uint128_t(23377747) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("D95FEEEB8B08DA598821A72199141ED75D5860BCCB0CA4E041E1387207F9C993")] = rai::uint128_t(22494918) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("A30E0A32ED41C8607AA9212843392E853FCBCB4E7CB194E35C94F07F91DE59EF")] = rai::uint128_t(12509769) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("BD6267D6ECD8038327D2BCC0850BDF8F56EC0414912207E81BCF90DFAC8A4AAA")] = rai::uint128_t(10217733) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("9FD3E7080D4B355AE2F030419DB1C1E0DBD802034347F850E9958469C9270A8B")] = rai::uint128_t(8905598) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("52084CBA1727B0D0E23F7AEAB232502E4D6B9C9C13F6585ECDC0D8B56AA98FB7")] = rai::uint128_t(7658245) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("5C2FBB148E006A8E8BA7A75DD86C9FE00C83F5FFDBFD76EAA09531071436B6AF")] = rai::uint128_t(6689496) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("2298FAB7C61058E77EA554CB93EDEEDA0692CBFCC540AB213B2836B29029E23A")] = rai::uint128_t(5328000) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("AE7AC63990DAAAF2A69BF11C913B928844BF5012355456F2F164166464024B29")] = rai::uint128_t(4643979) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("3FE80B4BC842E82C1C18ABFEEC47EA989E63953BC82AC411F304D13833D52A56")] = rai::uint128_t(4278325) * rai::Mxrb_ratio;
+		bootstrap_weights[rai::account("67556D31DDFC2A440BF6147501449B4CB9572278D034EE686A6BEE29851681DF")] = rai::uint128_t(4484501) * rai::Mxrb_ratio;
+	}
 }
 
 // Serialize a block prefixed with an 8-bit typecode
@@ -2153,6 +2171,18 @@ std::string rai::ledger::block_text (rai::block_hash const & hash_a)
 // Vote weight of an account
 rai::uint128_t rai::ledger::weight (MDB_txn * transaction_a, rai::account const & account_a)
 {
+	if (check_bootstrap_weights.load ())
+	{
+		auto blocks = store.block_count (transaction_a);
+		if (blocks.sum() < bootstrap_weight_max_blocks) {
+			auto weight = bootstrap_weights.find(account_a);
+			if (weight != bootstrap_weights.end ()) {
+				return weight->second;
+			}
+		} else {
+			check_bootstrap_weights = false;
+		}
+	}
 	return store.representation_get (transaction_a, account_a);
 }
 

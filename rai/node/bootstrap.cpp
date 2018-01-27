@@ -347,6 +347,16 @@ void rai::frontier_req_client::received_frontier (boost::system::error_code cons
 			start_time = std::chrono::steady_clock::now ();
 		}
 		++count;
+		std::chrono::duration<double> time_span = std::chrono::duration_cast<std::chrono::duration<double>> (std::chrono::steady_clock::now () - start_time);
+		double elapsed = time_span.count ();
+		double rate = (double)count / elapsed;
+		// TODO - move these constants before merging, once the bootstrap scaling patch is merged.
+		if (elapsed > 5 && rate < 1000)
+		{
+			BOOST_LOG (connection->node->log) << boost::str (boost::format ("Aborting frontier req because it was too slow"));
+			promise.set_value (true);
+			return;
+		}
 		auto now (std::chrono::steady_clock::now ());
 		if (next_report < now)
 		{
@@ -868,19 +878,21 @@ bool rai::bootstrap_attempt::still_pulling ()
 	auto running (!stopped);
 	auto more_pulls (!pulls.empty ());
 	auto still_pulling (pulling > 0);
-	return running && (more_pulls || still_pulling);
+	auto more_unresolved = (!unresolved_forks.empty ());
+	return running && (more_pulls || still_pulling || more_unresolved);
 }
 
 void rai::bootstrap_attempt::run ()
 {
 	populate_connections ();
+	resolve_forks ();
 	std::unique_lock<std::mutex> lock (mutex);
 	auto frontier_failure (true);
 	while (!stopped && frontier_failure)
 	{
 		frontier_failure = request_frontier (lock);
 	}
-	// Shuffle frontiers.
+	// Shuffle pulls.
 	for (int i = pulls.size () - 1; i > 0; i--)
 	{
 		auto k = rai::random_pool.GenerateWord32 (0, i);
@@ -950,13 +962,73 @@ bool rai::bootstrap_attempt::consume_future (std::future<bool> & future_a)
 }
 
 void rai::bootstrap_attempt::process_fork (MDB_txn * transaction_a, std::shared_ptr<rai::block> block_a)
+{	
+	std::unique_lock<std::mutex> lock (mutex);
+	try_resolve_fork (transaction_a, block_a);
+}
+
+void rai::bootstrap_attempt::try_resolve_fork (MDB_txn * transaction_a, std::shared_ptr<rai::block> block_a)
 {
+	assert (!mutex.try_lock ());
+	std::weak_ptr<rai::bootstrap_attempt> this_w (shared_from_this ());
 	std::shared_ptr<rai::block> ledger_block (node->ledger.forked_block (transaction_a, *block_a));
-	if (!node->active.start (transaction_a, ledger_block))
+	if (ledger_block)
 	{
+		node->active.start (transaction_a, ledger_block, [this_w, block_a](std::shared_ptr<rai::block>, bool resolved) {
+			if (auto this_l = this_w.lock ())
+			{
+				if (resolved)
+				{
+					{
+						std::unique_lock<std::mutex> lock (this_l->mutex);
+						this_l->unresolved_forks.erase (block_a->hash ());
+						this_l->condition.notify_all ();
+					}
+					rai::transaction transaction (this_l->node->store.environment, nullptr, false);
+					auto account (this_l->node->ledger.store.frontier_get (transaction, block_a->root ()));
+					if (!account.is_zero ())
+					{
+						this_l->requeue_pull (rai::pull_info (account, block_a->root (), block_a->root ()));
+					}
+					else if (this_l->node->ledger.store.account_exists (transaction, block_a->root ()))
+					{
+						this_l->requeue_pull (rai::pull_info (block_a->root (), rai::block_hash (0), rai::block_hash (0)));
+					}
+				}
+			}
+		});
+
+		auto hash = block_a->hash ();
+		if (unresolved_forks.find(hash) == unresolved_forks.end ()) {
+			BOOST_LOG (node->log) << boost::str (boost::format ("While bootstrappping, fork between our block: %2% and block %1% both with root %3% %4%") % ledger_block->hash ().to_string () % hash.to_string () % block_a->root ().to_string () % unresolved_forks.size ());
+			unresolved_forks[hash] = block_a;
+		}
 		node->network.broadcast_confirm_req (ledger_block);
 		node->network.broadcast_confirm_req (block_a);
-		BOOST_LOG (node->log) << boost::str (boost::format ("While bootstrappping, fork between our block: %2% and block %1% both with root %3%") % ledger_block->hash ().to_string () % block_a->hash ().to_string () % block_a->root ().to_string ());
+	}	
+}
+
+void rai::bootstrap_attempt::resolve_forks ()
+{
+	std::unique_lock<std::mutex> lock (mutex);
+	if (unresolved_forks.size () > 0)
+	{
+		BOOST_LOG (node->log) << boost::str (boost::format ("%1% unresolved forks while bootstrapping") % unresolved_forks.size ());
+		rai::transaction transaction (node->store.environment, nullptr, false);
+		for (auto & it : unresolved_forks)
+		{
+			try_resolve_fork (transaction, it.second);
+		}
+	}
+	if (!stopped)
+	{
+		std::weak_ptr<rai::bootstrap_attempt> this_w (shared_from_this ());
+		node->alarm.add (std::chrono::steady_clock::now () + std::chrono::seconds (30), [this_w]() {
+			if (auto this_l = this_w.lock ())
+			{
+				this_l->resolve_forks ();
+			}
+		});
 	}
 }
 
@@ -1115,21 +1187,8 @@ void rai::bootstrap_attempt::stop ()
 
 void rai::bootstrap_attempt::add_pull (rai::pull_info const & pull)
 {
-	static rai::account landing ("059F68AAB29DE0D3A27443625C7EA9CDDB6517A8B76FE37727EF6A4D76832AD5");
-	static rai::account faucet ("8E319CE6F3025E5B2DF66DA7AB1467FE48F1679C13DD43BFDB29FA2E9FC40D3B");
-	static rai::account account_1 ("6B31E80CABDD2FEE6F54A7BDBF91B666010418F4438EF0B48168F93CD79DBC85"); // xrb_1tsjx18cqqbhxsqobbxxqyauesi31iehaiwgy4ta4t9s9mdsuh671npo1st9
-	static rai::account account_2 ("FD6EE9E0E107A6A8584DB94A3F154799DD5C2A7D6ABED0889DA3B837B0E61663"); // xrb_3zdgx9ig43x8o3e6ugcc9wcnh8gxdio9ttoyt46buaxr8yrge7m5331qdwhk
-
 	std::lock_guard<std::mutex> lock (mutex);
-	rai::pull_info pull2 = pull;
-	if (pull.account != rai::genesis_account && pull.account != landing && pull.account != faucet && pull.account != account_1 && pull.account != account_2)
-	{
-		pulls.push_back (pull2);
-	}
-	else
-	{
-		pulls.push_front (pull2);
-	}
+	pulls.push_back (pull);
 	condition.notify_all ();
 }
 
