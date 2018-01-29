@@ -12,7 +12,6 @@ constexpr double bootstrap_minimum_termination_time = 30.0;
 constexpr unsigned bootstrap_max_new_connections = 10;
 constexpr unsigned bootstrap_peer_frontier_minimum = rai::rai_network == rai::rai_networks::rai_live_network ? 339000 : 0;
 
-
 rai::block_synchronization::block_synchronization (boost::log::sources::logger_mt & log_a) :
 log (log_a)
 {
@@ -962,7 +961,7 @@ bool rai::bootstrap_attempt::consume_future (std::future<bool> & future_a)
 }
 
 void rai::bootstrap_attempt::process_fork (MDB_txn * transaction_a, std::shared_ptr<rai::block> block_a)
-{	
+{
 	std::unique_lock<std::mutex> lock (mutex);
 	try_resolve_fork (transaction_a, block_a);
 }
@@ -999,13 +998,14 @@ void rai::bootstrap_attempt::try_resolve_fork (MDB_txn * transaction_a, std::sha
 		});
 
 		auto hash = block_a->hash ();
-		if (unresolved_forks.find(hash) == unresolved_forks.end ()) {
+		if (unresolved_forks.find (hash) == unresolved_forks.end ())
+		{
 			BOOST_LOG (node->log) << boost::str (boost::format ("While bootstrappping, fork between our block: %2% and block %1% both with root %3% %4%") % ledger_block->hash ().to_string () % hash.to_string () % block_a->root ().to_string () % unresolved_forks.size ());
 			unresolved_forks[hash] = block_a;
 		}
 		node->network.broadcast_confirm_req (ledger_block);
 		node->network.broadcast_confirm_req (block_a);
-	}	
+	}
 }
 
 void rai::bootstrap_attempt::resolve_forks ()
@@ -1042,14 +1042,15 @@ struct block_rate_cmp
 
 unsigned rai::bootstrap_attempt::target_connections (size_t pulls_remaining)
 {
-	if (node->config.bootstrap_connections >= node->config.bootstrap_connections_max) {
-		return std::max(1U, node->config.bootstrap_connections_max);
+	if (node->config.bootstrap_connections >= node->config.bootstrap_connections_max)
+	{
+		return std::max (1U, node->config.bootstrap_connections_max);
 	}
-	
+
 	// Only scale up to bootstrap_connections_max for large pulls.
 	double step = std::min (1.0, std::max (0.0, (double)pulls_remaining / bootstrap_connection_scale_target));
 	double target = (double)node->config.bootstrap_connections + (double)(node->config.bootstrap_connections_max - node->config.bootstrap_connections) * step;
-	return std::max(1U, (unsigned)(target + 0.5f));
+	return std::max (1U, (unsigned)(target + 0.5f));
 }
 
 void rai::bootstrap_attempt::populate_connections ()

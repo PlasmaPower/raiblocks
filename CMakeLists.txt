@@ -230,8 +230,17 @@ else ()
 	error ("Unknown platform: ${CMAKE_SYSTEM_NAME}")
 endif ()
 
+# Embed representative stakes in executables
+# Inspired by https://stackoverflow.com/a/27206982
+file (READ rai/representative_stakes.txt filedata HEX)
+string (REGEX REPLACE "(..)" "0x\\1," filedata ${filedata})
+file (WRITE ${CMAKE_BINARY_DIR}/bootstrap_weights.cpp "#include <cstddef>\n\
+	const unsigned char bootstrap_weights[] = {${filedata} 0x00};\n\
+	const size_t bootstrap_weights_size = sizeof(bootstrap_weights) - 1;\n")
+
 add_library (secure
 	${PLATFORM_SECURE_SOURCE}
+	${CMAKE_BINARY_DIR}/bootstrap_weights.cpp
 	rai/config.hpp
 	rai/secure.cpp
 	rai/secure.hpp

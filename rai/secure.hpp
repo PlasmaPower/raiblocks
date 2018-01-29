@@ -23,6 +23,8 @@ struct hash<rai::uint256_union>
 }
 namespace rai
 {
+extern const char bootstrap_weights[];
+extern const size_t bootstrap_weights_size;
 class keypair
 {
 public:
