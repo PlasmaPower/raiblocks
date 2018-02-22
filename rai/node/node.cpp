@@ -1354,6 +1354,7 @@ store (init_a.block_store_init, application_path_a / "data.ldb", config_a.lmdb_m
 gap_cache (*this),
 ledger (store, config_a.inactive_supply.number ()),
 active (*this),
+online_reps (*this),
 wallets (init_a.block_store_init, *this),
 network (*this, config.peering_port),
 bootstrap_initiator (*this),
@@ -1491,6 +1492,9 @@ block_processor_thread ([this]() { this->block_processor.process_blocks (); })
 	});
 	observers.vote.add ([this](std::shared_ptr<rai::vote> vote_a, rai::endpoint const &) {
 		this->gap_cache.vote (vote_a);
+	});
+	observers.vote.add ([this](std::shared_ptr<rai::vote> vote_a, rai::endpoint const &) {
+		this->online_reps.vote (vote_a);
 	});
 	observers.vote.add ([this](std::shared_ptr<rai::vote> vote_a, rai::endpoint const & endpoint_a) {
 		if (this->rep_crawler.exists (vote_a->block->hash ()))
@@ -1835,6 +1839,7 @@ void rai::node::start ()
 	bootstrap.start ();
 	backup_wallet ();
 	active.announce_votes ();
+	online_reps.recalculate_stake (true);
 	port_mapping.start ();
 	add_initial_peers ();
 	observers.started ();
@@ -2345,6 +2350,69 @@ bool rai::block_arrival::recent (rai::block_hash const & hash_a)
 	return arrival.get<1> ().find (hash_a) != arrival.get<1> ().end ();
 }
 
+rai::online_reps::online_reps (rai::node & node) :
+node (node)
+{
+}
+
+void rai::online_reps::vote (std::shared_ptr<rai::vote> const & vote_a)
+{
+	auto rep (vote_a->account);
+	std::lock_guard<std::mutex> lock (mutex);
+	auto now (std::chrono::steady_clock::now ());
+	while (!reps.empty () && reps.begin ()->last_heard + std::chrono::seconds (rai::node::cutoff) < now)
+	{
+		auto it (reps.begin ());
+		auto old_stake (online_stake);
+		online_stake -= node.weight (it->representative);
+		if (online_stake > old_stake)
+		{
+			// overflow
+			online_stake = 0;
+		}
+		reps.erase (it);
+	}
+	auto rep_it (reps.get<1> ().find (rep));
+	auto info (rai::rep_last_heard_info{ now, rep });
+	if (rep_it == reps.get<1> ().end ())
+	{
+		auto old_stake (online_stake);
+		online_stake += node.weight (rep);
+		if (online_stake < old_stake)
+		{
+			// overflow
+			online_stake = ~0;
+		}
+		reps.insert (info);
+	}
+	else
+	{
+		reps.get<1> ().replace (rep_it, info);
+	}
+}
+
+void rai::online_reps::recalculate_stake (bool initializing)
+{
+	if (initializing)
+	{
+		// set stake to max until we're sure who's online
+		online_stake = ~0;
+	}
+	else
+	{
+		std::lock_guard<std::mutex> lock (mutex);
+		online_stake = 0;
+		rai::transaction transaction (node.store.environment, nullptr, false);
+		for (auto it : reps)
+		{
+			online_stake += node.ledger.weight (transaction, it.representative);
+		}
+	}
+	auto now (std::chrono::steady_clock::now ());
+	auto node_l (node.shared ());
+	node.alarm.add (now + std::chrono::minutes (5), [node_l]() { node_l->online_reps.recalculate_stake (); });
+}
+
 std::unordered_set<rai::endpoint> rai::peer_container::random_set (size_t count_a)
 {
 	std::unordered_set<rai::endpoint> result;
@@ -2731,13 +2799,15 @@ void rai::election::broadcast_winner ()
 rai::uint128_t rai::election::quorum_threshold (MDB_txn * transaction_a, rai::ledger & ledger_a)
 {
 	// Threshold over which unanimous voting implies confirmation
-	return ledger_a.supply (transaction_a) / 2;
+	auto supply_cap (ledger_a.supply (transaction_a) / 2);   // 50% of stake
+	auto online_cap (node.online_reps.online_stake * 3 / 5); // 60% of online reps
+	return (online_cap < supply_cap) ? online_cap : supply_cap;
 }
 
 rai::uint128_t rai::election::minimum_threshold (MDB_txn * transaction_a, rai::ledger & ledger_a)
 {
 	// Minimum number of votes needed to change our ledger, underwhich we're probably disconnected
-	return ledger_a.supply (transaction_a) / 16;
+	return node.online_reps.online_stake / 16;
 }
 
 void rai::election::confirm_once (MDB_txn * transaction_a)
