@@ -832,28 +832,48 @@ void rai::wallet_store::destroy (MDB_txn * transaction_a)
 	assert (status == 0);
 }
 
-std::shared_ptr<rai::block> rai::wallet::receive_action (rai::send_block const & send_a, rai::account const & representative_a, rai::uint128_union const & amount_a, bool generate_work_a)
+std::shared_ptr<rai::block> rai::wallet::receive_action (rai::block const & send_a, rai::account const & representative_a, rai::uint128_union const & amount_a, bool generate_work_a)
 {
+	rai::account account;
+	rai::send_block const *send_block (dynamic_cast<rai::send_block const *> (&send_a));
+	rai::utx_block const *utx_block (dynamic_cast<rai::utx_block const *> (&send_a));
+	if (send_block != nullptr)
+	{
+		account = send_block->hashables.destination;
+	}
+	else if (utx_block != nullptr)
+	{
+		account = utx_block->hashables.link;
+	}
+	else
+	{
+		assert (false);
+	}
 	auto hash (send_a.hash ());
 	std::shared_ptr<rai::block> block;
 	if (node.config.receive_minimum.number () <= amount_a.number ())
 	{
 		rai::transaction transaction (node.ledger.store.environment, nullptr, false);
-		if (node.ledger.store.pending_exists (transaction, rai::pending_key (send_a.hashables.destination, hash)))
+		rai::pending_info pending_info;
+		if (!node.ledger.store.pending_get (transaction, rai::pending_key (account, hash), pending_info))
 		{
 			rai::raw_key prv;
-			if (!store.fetch (transaction, send_a.hashables.destination, prv))
+			if (!store.fetch (transaction, account, prv))
 			{
 				rai::account_info info;
-				auto new_account (node.ledger.store.account_get (transaction, send_a.hashables.destination, info));
+				auto new_account (node.ledger.store.account_get (transaction, account, info));
 				if (!new_account)
 				{
-					auto receive (new rai::receive_block (info.head, hash, prv, send_a.hashables.destination, generate_work_a ? work_fetch (transaction, send_a.hashables.destination, info.head) : 0));
-					block.reset (receive);
+					//auto receive (new rai::receive_block (info.head, hash, prv, account, generate_work_a ? work_fetch (transaction, account, info.head) : 0));
+					//block.reset (receive);
+					std::shared_ptr<rai::block> rep_block = node.ledger.store.block_get (transaction, info.rep_block);
+					assert (rep_block != nullptr);
+					block.reset (new rai::utx_block (account, info.head, rep_block->representative (), info.balance.number () + pending_info.amount.number (), hash, prv, account, generate_work_a ? work_fetch (transaction, account, info.head) : 0));
 				}
 				else
 				{
-					block.reset (new rai::open_block (hash, representative_a, send_a.hashables.destination, prv, send_a.hashables.destination, generate_work_a ? work_fetch (transaction, send_a.hashables.destination, send_a.hashables.destination) : 0));
+					//block.reset (new rai::open_block (hash, representative_a, account, prv, account, generate_work_a ? work_fetch (transaction, account, account) : 0));
+					block.reset (new rai::utx_block (account, info.head, representative_a, pending_info.amount, hash, prv, account, generate_work_a ? work_fetch (transaction, account, account) : 0));
 				}
 			}
 			else
@@ -880,7 +900,7 @@ std::shared_ptr<rai::block> rai::wallet::receive_action (rai::send_block const &
 		{
 			auto hash (block->hash ());
 			auto this_l (shared_from_this ());
-			auto source (send_a.hashables.destination);
+			auto source (account);
 			node.wallets.queue_wallet_action (rai::wallets::generate_priority, [this_l, source, hash] {
 				this_l->work_generate (source, hash);
 			});
@@ -905,7 +925,8 @@ std::shared_ptr<rai::block> rai::wallet::change_action (rai::account const & sou
 				rai::raw_key prv;
 				auto error2 (store.fetch (transaction, source_a, prv));
 				assert (!error2);
-				block.reset (new rai::change_block (info.head, representative_a, prv, source_a, generate_work_a ? work_fetch (transaction, source_a, info.head) : 0));
+				//block.reset (new rai::change_block (info.head, representative_a, prv, source_a, generate_work_a ? work_fetch (transaction, source_a, info.head) : 0));
+				block.reset (new rai::utx_block (source_a, info.head, representative_a, info.balance, 0, prv, source_a, generate_work_a ? work_fetch (transaction, source_a, info.head) : 0));
 			}
 		}
 	}
@@ -973,7 +994,10 @@ std::shared_ptr<rai::block> rai::wallet::send_action (rai::account const & sourc
 						rai::raw_key prv;
 						auto error2 (store.fetch (transaction, source_a, prv));
 						assert (!error2);
-						block.reset (new rai::send_block (info.head, account_a, balance - amount_a, prv, source_a, generate_work_a ? work_fetch (transaction, source_a, info.head) : 0));
+						//block.reset (new rai::send_block (info.head, account_a, balance - amount_a, prv, source_a, generate_work_a ? work_fetch (transaction, source_a, info.head) : 0));
+						std::shared_ptr<rai::block> rep_block = node.ledger.store.block_get (transaction, info.rep_block);
+						assert (rep_block != nullptr);
+						block.reset (new rai::utx_block (source_a, info.head, rep_block->representative (), balance - amount_a, account_a, prv, source_a, generate_work_a ? work_fetch (transaction, source_a, info.head) : 0));
 						if (id_mdb_val)
 						{
 							auto status (mdb_put (transaction, node.wallets.send_action_ids, *id_mdb_val, rai::mdb_val (block->hash ()), 0));
@@ -1031,9 +1055,9 @@ bool rai::wallet::receive_sync (std::shared_ptr<rai::block> block_a, rai::accoun
 
 void rai::wallet::receive_async (std::shared_ptr<rai::block> block_a, rai::account const & representative_a, rai::uint128_t const & amount_a, std::function<void(std::shared_ptr<rai::block>)> const & action_a, bool generate_work_a)
 {
-	assert (dynamic_cast<rai::send_block *> (block_a.get ()) != nullptr);
+	//assert (dynamic_cast<rai::send_block *> (block_a.get ()) != nullptr);
 	node.wallets.queue_wallet_action (amount_a, [this, block_a, representative_a, amount_a, action_a, generate_work_a]() {
-		auto block (receive_action (*static_cast<rai::send_block *> (block_a.get ()), representative_a, amount_a, generate_work_a));
+		auto block (receive_action (*static_cast<rai::block *> (block_a.get ()), representative_a, amount_a, generate_work_a));
 		action_a (block);
 	});
 }
