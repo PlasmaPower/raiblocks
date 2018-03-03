@@ -1064,7 +1064,8 @@ TEST (node, fork_no_vote_quorum)
 	ASSERT_EQ (node1.config.receive_minimum.number (), node1.weight (key1));
 	ASSERT_EQ (node1.config.receive_minimum.number (), node2.weight (key1));
 	ASSERT_EQ (node1.config.receive_minimum.number (), node3.weight (key1));
-	rai::send_block send1 (block->hash (), key1, (rai::genesis_amount / 4) - (node1.config.receive_minimum.number () * 2), rai::test_genesis_key.prv, rai::test_genesis_key.pub, system.work.generate (block->hash ()));
+	//rai::send_block send1 (block->hash (), key1, (rai::genesis_amount / 4) - (node1.config.receive_minimum.number () * 2), rai::test_genesis_key.prv, rai::test_genesis_key.pub, system.work.generate (block->hash ()));
+	rai::utx_block send1 (rai::genesis_account, block->hash (), rai::genesis_account, (rai::genesis_amount / 4) - (node1.config.receive_minimum.number () * 2), key1, rai::test_genesis_key.prv, rai::test_genesis_key.pub, system.work.generate (block->hash ()));
 	ASSERT_EQ (rai::process_result::progress, node1.process (send1).code);
 	ASSERT_EQ (rai::process_result::progress, node2.process (send1).code);
 	ASSERT_EQ (rai::process_result::progress, node3.process (send1).code);
