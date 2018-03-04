@@ -246,6 +246,7 @@ void ledger_processor::utx_block (rai::utx_block const & block_a)
 					rai::pending_key key (block_a.hashables.link, hash);
 					rai::pending_info info (block_a.hashables.account, 0 - result.amount.number ());
 					ledger.store.pending_put (transaction, key, info);
+					result.pending_account = block_a.hashables.link;
 				}
 				else if (!block_a.hashables.link.is_zero ())
 				{
