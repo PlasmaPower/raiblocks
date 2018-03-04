@@ -1110,7 +1110,7 @@ bool rai::utx_block::valid_predecessor (rai::block const & block_a) const
 
 rai::block_hash rai::utx_block::source () const
 {
-	return hashables.link;
+	return 0;
 }
 
 rai::block_hash rai::utx_block::root () const

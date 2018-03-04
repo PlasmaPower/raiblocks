@@ -211,16 +211,12 @@ void ledger_processor::utx_block (rai::utx_block const & block_a)
 				{
 					if (!block_a.hashables.link.is_zero ())
 					{
-						result.code = ledger.store.block_exists (transaction, block_a.hashables.link) ? rai::process_result::progress : rai::process_result::gap_source; // Have we seen the source block already? (Harmless)
+						rai::pending_key key (block_a.hashables.account, block_a.hashables.link);
+						rai::pending_info pending;
+						result.code = ledger.store.pending_get (transaction, key, pending) ? rai::process_result::unreceivable : rai::process_result::progress; // Has this source already been received (Malformed)
 						if (result.code == rai::process_result::progress)
 						{
-							rai::pending_key key (block_a.hashables.account, block_a.hashables.link);
-							rai::pending_info pending;
-							result.code = ledger.store.pending_get (transaction, key, pending) ? rai::process_result::unreceivable : rai::process_result::progress; // Has this source already been received (Malformed)
-							if (result.code == rai::process_result::progress)
-							{
-								result.code = result.amount == pending.amount ? rai::process_result::progress : rai::process_result::balance_mismatch;
-							}
+							result.code = result.amount == pending.amount ? rai::process_result::progress : rai::process_result::balance_mismatch;
 						}
 					}
 					else
