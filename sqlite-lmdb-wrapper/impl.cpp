@@ -458,93 +458,36 @@ int mdb_put (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value, unsigne
 		auto dbi_l ((MDB_dbi_inner *)dbi);
 		boost::optional<int64_t> rowid;
 		std::string & db_name (dbi_l->name);
-		// TODO "INSERT OR REPLACE", then look at sqlite3_changes which does not count REPLACE
-		if (!dbi_l->dups)
+		// Insert the row
+		const char * query = "INSERT OR REPLACE INTO ? (key, value) VALUES (?, ?);";
+		result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
+		if (!result)
 		{
-			const char * query = "SELECT ROWID FROM ? WHERE key = ?;";
-			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
-			if (!result)
-			{
-				result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_step (stmt);
-				if (result == SQLITE_ROW)
-				{
-					result = 0;
-					rowid = sqlite3_column_int64 (stmt, 0);
-				}
-				else if (result == SQLITE_DONE)
-				{
-					result = 0;
-				}
-			}
-			int cleanup_result (sqlite3_finalize (stmt));
-			stmt = nullptr;
-			if (!result)
-			{
-				result = cleanup_result;
-			}
+			result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
 		}
-		if (!result && rowid)
+		if (!result)
 		{
-			// Update the row
-			const char * query = "UPDATE ? SET value = ? WHERE ROWID = ?;";
-			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
-			if (!result)
-			{
-				result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_bind_blob (stmt, 2, value->mv_data, value->mv_size, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_bind_int64 (stmt, 3, *rowid);
-			}
-			if (!result)
-			{
-				result = sqlite3_step (stmt);
-				if (result == SQLITE_DONE)
-				{
-					result = 0;
-				}
-			}
+			result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
 		}
-		else if (!result)
+		if (!result)
 		{
-			// Insert the row
-			const char * query = "INSERT INTO ? (key, value) VALUES (?, ?);";
-			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
-			if (!result)
+			result = sqlite3_bind_blob (stmt, 3, value->mv_data, value->mv_size, SQLITE_STATIC);
+		}
+		if (!result)
+		{
+			result = sqlite3_step (stmt);
+			if (result == SQLITE_DONE)
 			{
-				result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_bind_blob (stmt, 3, value->mv_data, value->mv_size, SQLITE_STATIC);
-			}
-			if (!result)
-			{
-				result = sqlite3_step (stmt);
-				if (result == SQLITE_DONE)
+				// The "REPLACE" in "INSERT OR REPLACE" doesn't affect the change count
+				// So if we see changes, a row has been inserted
+				if (sqlite3_changes (txn->db_conn))
+				{
+					result = increment_dbi_entries (txn, db_name);
+				}
+				else
 				{
 					result = 0;
 				}
-			}
-			if (!result)
-			{
-				result = increment_dbi_entries (txn, db_name);
 			}
 		}
 		int cleanup_result (sqlite3_finalize (stmt));
@@ -596,19 +539,17 @@ int mdb_del (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value)
 			result = sqlite3_step (stmt);
 			if (result == SQLITE_DONE)
 			{
-				if (sqlite3_changes (txn->db_conn) == 0)
+				if (sqlite3_changes (txn->db_conn))
 				{
-					result = SQLITE_NOTFOUND;
+					result = decrement_dbi_entries (txn, dbi_l->name);
 				}
 				else
 				{
-					result = 0;
+					// If there are no changes, we didn't delete anything
+					// In LMDB this is viewed as the delete target not being found
+					result = SQLITE_NOTFOUND;
 				}
 			}
-		}
-		if (!result)
-		{
-			result = decrement_dbi_entries (txn, dbi_l->name);
 		}
 		int cleanup_result (sqlite3_finalize (stmt));
 		stmt = nullptr;
