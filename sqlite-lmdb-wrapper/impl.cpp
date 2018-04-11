@@ -458,6 +458,7 @@ int mdb_put (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value, unsigne
 		auto dbi_l ((MDB_dbi_inner *)dbi);
 		boost::optional<int64_t> rowid;
 		std::string & db_name (dbi_l->name);
+		// TODO "INSERT OR REPLACE", then look at sqlite3_changes which does not count REPLACE
 		if (!dbi_l->dups)
 		{
 			const char * query = "SELECT ROWID FROM ? WHERE key = ?;";
@@ -519,7 +520,7 @@ int mdb_put (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value, unsigne
 		else if (!result)
 		{
 			// Insert the row
-			const char * query = "INSER INTO ? (key, value) VALUES (?, ?);";
+			const char * query = "INSERT INTO ? (key, value) VALUES (?, ?);";
 			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
 			if (!result)
 			{
@@ -566,31 +567,54 @@ int mdb_del (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value)
 	}
 	std::cerr << std::endl;
 #endif
-	int result = 0;
-	if (!txn->write_txn)
+	int result (0);
+	if (!txn->can_write)
 	{
 		result = EACCES;
 	}
 	else
 	{
-		std::vector<uint8_t> namespaced_key (namespace_key (key, dbi));
-		Slice key ((const char *)namespaced_key.data (), namespaced_key.size ());
-		bool exists;
-		result = txn_key_exists (txn, key, &exists).code (); // check if exists
+		auto dbi_l ((MDB_dbi_inner *)dbi);
+		sqlite3_stmt * stmt (nullptr);
+		bool match_value (dbi_l->dups && value);
+		const char * query = match_value ? "DELETE FROM ? WHERE key = ? AND value = ?;" : "DELETE FROM ? WHERE key = ?;";
+		result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
 		if (!result)
 		{
-			if (!exists)
+			result = sqlite3_bind_text (stmt, 1, dbi_l->name.c_str (), dbi_l->name.size () + 1, SQLITE_STATIC);
+		}
+		if (!result)
+		{
+			result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
+		}
+		if (!result && match_value)
+		{
+			result = sqlite3_bind_blob (stmt, 3, value->mv_data, value->mv_size, SQLITE_STATIC);
+		}
+		if (!result)
+		{
+			result = sqlite3_step (stmt);
+			if (result == SQLITE_DONE)
 			{
-				result = MDB_NOTFOUND;
-			}
-			else
-			{
-				result = txn->write_txn->Delete (key).code ();
-				if (!result)
+				if (sqlite3_changes (txn->db_conn) == 0)
 				{
-					result = decrement_dbi_entries (txn, dbi);
+					result = SQLITE_NOTFOUND;
+				}
+				else
+				{
+					result = 0;
 				}
 			}
+		}
+		if (!result)
+		{
+			result = decrement_dbi_entries (txn, dbi_l->name);
+		}
+		int cleanup_result (sqlite3_finalize (stmt));
+		stmt = nullptr;
+		if (!result)
+		{
+			result = cleanup_result;
 		}
 	}
 	return result;
