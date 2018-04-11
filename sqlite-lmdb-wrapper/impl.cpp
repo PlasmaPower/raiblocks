@@ -187,10 +187,10 @@ int mdb_dbi_open (MDB_txn * txn, const char * name_a, unsigned int flags, MDB_db
 	if (!result)
 	{
 		result = sqlite3_step (stmt);
-	}
-	if (result == SQLITE_DONE)
-	{
-		result = 0;
+		if (result == SQLITE_DONE)
+		{
+			result = 0;
+		}
 	}
 	// Can be called at any point in the lifecycle of stmt
 	int cleanup_result (sqlite3_finalize (stmt));
@@ -210,10 +210,10 @@ int mdb_dbi_open (MDB_txn * txn, const char * name_a, unsigned int flags, MDB_db
 		if (!result)
 		{
 			result = sqlite3_step (stmt);
-		}
-		if (result == SQLITE_DONE)
-		{
-			result = 0;
+			if (result == SQLITE_DONE)
+			{
+				result = 0;
+			}
 		}
 		cleanup_result = sqlite3_finalize (stmt);
 		stmt = nullptr;
@@ -345,18 +345,18 @@ int mdb_get (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value)
 	if (!result)
 	{
 		result = sqlite3_step (stmt);
-	}
-	if (result == SQLITE_ROW)
-	{
-		result = 0;
-		value->mv_size = sqlite3_column_bytes (stmt, 0);
-		value->mv_data = malloc (value->mv_size);
-		txn->mdb_values.push_back (value->mv_data);
-		std::memcpy (value->mv_data, sqlite3_column_blob (stmt, 0), value->mv_size);
-	}
-	else if (result == SQLITE_DONE)
-	{
-		result = SQLITE_NOTFOUND;
+		if (result == SQLITE_ROW)
+		{
+			result = 0;
+			value->mv_size = sqlite3_column_bytes (stmt, 0);
+			value->mv_data = malloc (value->mv_size);
+			txn->mdb_values.push_back (value->mv_data);
+			std::memcpy (value->mv_data, sqlite3_column_blob (stmt, 0), value->mv_size);
+		}
+		else if (result == SQLITE_DONE)
+		{
+			result = SQLITE_NOTFOUND;
+		}
 	}
 	int cleanup_result (sqlite3_finalize (stmt));
 	stmt = nullptr;
@@ -407,10 +407,10 @@ int add_dbi_entries (MDB_txn * txn, const std::string & db_name, int64_t delta)
 	if (!result)
 	{
 		result = sqlite3_step (stmt);
-	}
-	if (result == SQLITE_DONE)
-	{
-		result = 0;
+		if (result == SQLITE_DONE)
+		{
+			result = 0;
+		}
 	}
 	int cleanup_result (sqlite3_finalize (stmt));
 	stmt = nullptr;
@@ -455,48 +455,92 @@ int mdb_put (MDB_txn * txn, MDB_dbi dbi, MDB_val * key, MDB_val * value, unsigne
 	else
 	{
 		sqlite3_stmt * stmt (nullptr);
-		const char * query = "SELECT ROWID FROM ? WHERE key = ?;";
-		result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
-		std::string & db_name (((MDB_dbi_inner *)dbi)->name);
-		if (!result)
-		{
-			result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
-		}
-		if (!result)
-		{
-			result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
-		}
-		if (!result)
-		{
-			result = sqlite3_step (stmt);
-		}
+		auto dbi_l ((MDB_dbi_inner *)dbi);
 		boost::optional<int64_t> rowid;
-		if (result == SQLITE_ROW)
+		std::string & db_name (dbi_l->name);
+		if (!dbi_l->dups)
 		{
-			result = 0;
-			rowid = sqlite3_column_int64 (stmt, 0);
-		}
-		else if (result == SQLITE_DONE)
-		{
-			result = 0;
-		}
-		int cleanup_result (sqlite3_finalize (stmt));
-		stmt = nullptr;
-		if (!result)
-		{
-			result = cleanup_result;
+			const char * query = "SELECT ROWID FROM ? WHERE key = ?;";
+			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
+			if (!result)
+			{
+				result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_step (stmt);
+				if (result == SQLITE_ROW)
+				{
+					result = 0;
+					rowid = sqlite3_column_int64 (stmt, 0);
+				}
+				else if (result == SQLITE_DONE)
+				{
+					result = 0;
+				}
+			}
+			int cleanup_result (sqlite3_finalize (stmt));
+			stmt = nullptr;
+			if (!result)
+			{
+				result = cleanup_result;
+			}
 		}
 		if (!result && rowid)
 		{
 			// Update the row
 			const char * query = "UPDATE ? SET value = ? WHERE ROWID = ?;";
 			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
+			if (!result)
+			{
+				result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_bind_blob (stmt, 2, value->mv_data, value->mv_size, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_bind_int64 (stmt, 3, *rowid);
+			}
+			if (!result)
+			{
+				result = sqlite3_step (stmt);
+				if (result == SQLITE_DONE)
+				{
+					result = 0;
+				}
+			}
 		}
 		else if (!result)
 		{
 			// Insert the row
-			const char * query = "UPDATE ? SET value = ? WHERE ROWID = ?;";
+			const char * query = "INSER INTO ? (key, value) VALUES (?, ?);";
 			result = sqlite3_prepare_v2 (txn->db_conn, query, strlen (query) + 1, &stmt, nullptr);
+			if (!result)
+			{
+				result = sqlite3_bind_text (stmt, 1, db_name.c_str (), db_name.size () + 1, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_bind_blob (stmt, 2, key->mv_data, key->mv_size, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_bind_blob (stmt, 3, value->mv_data, value->mv_size, SQLITE_STATIC);
+			}
+			if (!result)
+			{
+				result = sqlite3_step (stmt);
+				if (result == SQLITE_DONE)
+				{
+					result = 0;
+				}
+			}
 			if (!result)
 			{
 				result = increment_dbi_entries (txn, db_name);
