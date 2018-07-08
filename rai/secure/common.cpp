@@ -679,8 +679,20 @@ rai::vote::vote (bool & error_a, rai::stream & stream_a)
 				error_a = rai::read (stream_a, sequence);
 				if (!error_a)
 				{
-					block = rai::deserialize_block (stream_a);
-					error_a = block == nullptr;
+					rai::block_type type;
+					error_a = rai::read (stream_a, type);
+					if (!error_a)
+					{
+						if (type == rai::block_type::not_a_block)
+						{
+							error_a = rai::read (stream_a, block_hash);
+						}
+						else
+						{
+							block = rai::deserialize_block (stream_a);
+							error_a = block == nullptr;
+						}
+					}
 				}
 			}
 		}
@@ -700,8 +712,15 @@ rai::vote::vote (bool & error_a, rai::stream & stream_a, rai::block_type type_a)
 				error_a = rai::read (stream_a, sequence);
 				if (!error_a)
 				{
-					block = rai::deserialize_block (stream_a, type_a);
-					error_a = block == nullptr;
+					if (type_a == rai::block_type::not_a_block)
+					{
+						error_a = rai::read (stream_a, block_hash.bytes);
+					}
+					else
+					{
+						block = rai::deserialize_block (stream_a, type_a);
+						error_a = block == nullptr;
+					}
 				}
 			}
 		}
@@ -711,6 +730,7 @@ rai::vote::vote (bool & error_a, rai::stream & stream_a, rai::block_type type_a)
 rai::vote::vote (rai::account const & account_a, rai::raw_key const & prv_a, uint64_t sequence_a, std::shared_ptr<rai::block> block_a) :
 sequence (sequence_a),
 block (block_a),
+block_hash (block_a->hash ()),
 account (account_a),
 signature (rai::sign_message (prv_a, account_a, hash ()))
 {
@@ -725,8 +745,20 @@ rai::vote::vote (MDB_val const & value_a)
 	assert (!error);
 	error = rai::read (stream, sequence);
 	assert (!error);
-	block = rai::deserialize_block (stream);
-	assert (block != nullptr);
+	rai::block_type type;
+	auto error (rai::read (stream, type));
+	assert (!error);
+	if (type == rai::block_type::not_a_block)
+	{
+		error = rai::read (stream, block_hash.bytes);
+		assert (!error);
+	}
+	else
+	{
+		block = rai::deserialize_block (stream, type);
+		assert (block != nullptr);
+		block_hash = block->hash ();
+	}
 }
 
 rai::uint256_union rai::vote::hash () const
@@ -734,7 +766,7 @@ rai::uint256_union rai::vote::hash () const
 	rai::uint256_union result;
 	blake2b_state hash;
 	blake2b_init (&hash, sizeof (result.bytes));
-	blake2b_update (&hash, block->hash ().bytes.data (), sizeof (result.bytes));
+	blake2b_update (&hash, block_hash.bytes.data (), sizeof (block_hash.bytes));
 	union
 	{
 		uint64_t qword;
@@ -746,12 +778,21 @@ rai::uint256_union rai::vote::hash () const
 	return result;
 }
 
-void rai::vote::serialize (rai::stream & stream_a, rai::block_type)
+void rai::vote::serialize (rai::stream & stream_a, rai::block_type type)
 {
 	write (stream_a, account);
 	write (stream_a, signature);
 	write (stream_a, sequence);
-	block->serialize (stream_a);
+	if (type == rai::block_type::not_a_block)
+	{
+		write (stream_a, rai::block_type::not_a_block);
+		write (stream_a, block_hash);
+	}
+	else
+	{
+		assert (block != nullptr);
+		block->serialize (stream_a);
+	}
 }
 
 void rai::vote::serialize (rai::stream & stream_a)
@@ -759,7 +800,15 @@ void rai::vote::serialize (rai::stream & stream_a)
 	write (stream_a, account);
 	write (stream_a, signature);
 	write (stream_a, sequence);
-	rai::serialize_block (stream_a, *block);
+	if (block == nullptr)
+	{
+		write (stream_a, rai::block_type::not_a_block);
+		write (stream_a, block_hash);
+	}
+	else
+	{
+		rai::serialize_block (stream_a, *block);
+	}
 }
 
 bool rai::vote::deserialize (rai::stream & stream_a)
@@ -773,8 +822,20 @@ bool rai::vote::deserialize (rai::stream & stream_a)
 			result = read (stream_a, sequence);
 			if (!result)
 			{
-				block = rai::deserialize_block (stream_a, block_type ());
-				result = block == nullptr;
+				rai::block_type type;
+				result = rai::read (stream_a, type);
+				if (!result)
+				{
+					if (type == rai::block_type::not_a_block)
+					{
+						result = rai::read (stream_a, block_hash);
+					}
+					else
+					{
+						block = rai::deserialize_block (stream_a);
+						result = block == nullptr;
+					}
+				}
 			}
 		}
 	}

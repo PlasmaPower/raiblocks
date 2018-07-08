@@ -206,7 +206,9 @@ public:
 	std::string to_json () const;
 	// Vote round sequence number
 	uint64_t sequence;
+	// May be null (in some cases we just have the hash)
 	std::shared_ptr<rai::block> block;
+	rai::block_hash block_hash;
 	// Account that's voting
 	rai::account account;
 	// Signature of sequence + block hash
