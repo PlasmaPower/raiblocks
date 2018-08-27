@@ -2,7 +2,7 @@
 
 #include <boost/filesystem.hpp>
 
-#include <lmdb/libraries/liblmdb/lmdb.h>
+#include <rocksdb-lmdb-wrapper/lmdb.h>
 
 #include <rai/lib/numbers.hpp>
 #include <rai/secure/common.hpp>

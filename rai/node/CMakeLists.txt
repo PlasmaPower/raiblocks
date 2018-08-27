@@ -44,7 +44,8 @@ target_link_libraries (node
 	rai_lib
 	libminiupnpc-static
 	argon2
-	lmdb
+	rocksdb-lmdb-wrapper
+	rocksdb
 	Boost::filesystem
 	Boost::log
 	Boost::log_setup

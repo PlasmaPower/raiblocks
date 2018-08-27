@@ -137,9 +137,9 @@ std::error_code rai::handle_node_options (boost::program_options::variables_map 
 	{
 		try
 		{
-			auto vacuum_path = data_path / "vacuumed.ldb";
-			auto source_path = data_path / "data.ldb";
-			auto backup_path = data_path / "backup.vacuum.ldb";
+			auto vacuum_path = data_path / "vacuumed_rocksdb";
+			auto source_path = data_path / "data_rocksdb";
+			auto backup_path = data_path / "backup.vacuum_rocksdb";
 
 			std::cout << "Vacuuming database copy in " << data_path << std::endl;
 			std::cout << "This may take a while..." << std::endl;
@@ -187,8 +187,8 @@ std::error_code rai::handle_node_options (boost::program_options::variables_map 
 		{
 			boost::filesystem::path data_path = vm.count ("data_path") ? boost::filesystem::path (vm["data_path"].as<std::string> ()) : rai::working_path ();
 
-			auto source_path = data_path / "data.ldb";
-			auto snapshot_path = data_path / "snapshot.ldb";
+			auto source_path = data_path / "data_rocksdb";
+			auto snapshot_path = data_path / "snapshot_rocksdb";
 
 			std::cout << "Database snapshot of " << source_path << " to " << snapshot_path << " in progress" << std::endl;
 			std::cout << "This may take a while..." << std::endl;

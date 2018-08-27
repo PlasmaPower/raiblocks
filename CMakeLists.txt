@@ -200,13 +200,12 @@ add_library (xxhash
 	xxhash/xxhash.c
 	xxhash/xxhash.h)
 
-add_library (lmdb
-	lmdb/libraries/liblmdb/lmdb.h
-	lmdb/libraries/liblmdb/mdb.c
-	lmdb/libraries/liblmdb/midl.c)
+add_library (rocksdb-lmdb-wrapper
+	rocksdb-lmdb-wrapper/impl.cpp
+	rocksdb-lmdb-wrapper/lmdb.h)
 
 if (WIN32)
-	target_link_libraries(lmdb ntdll)
+	target_link_libraries(rocksdb-lmdb-wrapper rocksdb ntdll)
 endif()
 
 if (WIN32)

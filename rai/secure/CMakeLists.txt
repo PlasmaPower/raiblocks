@@ -36,7 +36,8 @@ add_library (secure
 target_link_libraries(secure
 	ed25519
 	rai_lib
-	lmdb
+	rocksdb-lmdb-wrapper
+	rocksdb
 	Boost::boost
 	Boost::system
 	Boost::filesystem)
