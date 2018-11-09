@@ -43,9 +43,11 @@ target_link_libraries(secure
 	ed25519
 	rai_lib
 	lmdb
+	dl
 	Boost::boost
 	Boost::system
-	Boost::filesystem)
+	Boost::filesystem
+	boost_stacktrace_basic)
 
 target_compile_definitions(secure PUBLIC
 	-DQT_NO_KEYWORDS

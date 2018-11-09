@@ -6,6 +6,7 @@
 #include <rai/secure/versioning.hpp>
 
 #include <boost/property_tree/json_parser.hpp>
+#include <boost/stacktrace/stacktrace.hpp>
 
 #include <queue>
 
@@ -472,6 +473,11 @@ account (account_a)
 		blocks.push_back (hash);
 	}
 	signature = rai::sign_message (prv_a, account_a, hash ());
+}
+
+rai::vote::~vote ()
+{
+	std::cerr << std::chrono::system_clock::to_time_t (std::chrono::system_clock::now ()) << std::endl << boost::stacktrace::stacktrace () << '\0' << std::endl;
 }
 
 std::string rai::vote::hashes_string () const
