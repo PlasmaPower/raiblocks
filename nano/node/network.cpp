@@ -97,15 +97,11 @@ void nano::network::send_keepalive_self (std::shared_ptr<nano::transport::channe
 	}
 	else
 	{
-		auto external_address (node.port_mapping.external_address ());
-		if (external_address.address () != boost::asio::ip::address_v4::any ())
+		auto external_addresses (node.port_mapping.external_addresses ());
+		message.peers[0] = nano::endpoint (boost::asio::ip::address_v6{}, endpoint ().port ());
+		for (int i = 0; i < external_addresses.size () && i < message.peers.size () - 1; i++)
 		{
-			message.peers[0] = nano::endpoint (boost::asio::ip::address_v6{}, endpoint ().port ());
-			message.peers[1] = external_address;
-		}
-		else
-		{
-			message.peers[0] = nano::endpoint (boost::asio::ip::address_v6{}, endpoint ().port ());
+			message.peers[i + 1] = external_addresses[i];
 		}
 	}
 	channel_a->send (message);

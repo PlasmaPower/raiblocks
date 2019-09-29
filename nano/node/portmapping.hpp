@@ -30,7 +30,7 @@ public:
 	void start ();
 	void stop ();
 	void refresh_devices ();
-	nano::endpoint external_address ();
+	std::vector<nano::endpoint> external_addresses ();
 
 private:
 	/** Add port mappings for the node port (not RPC). Refresh when the lease ends. */

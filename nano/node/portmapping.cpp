@@ -49,15 +49,15 @@ void nano::port_mapping::refresh_devices ()
 	}
 }
 
-nano::endpoint nano::port_mapping::external_address ()
+std::vector<nano::endpoint> nano::port_mapping::external_addresses ()
 {
-	nano::endpoint result (boost::asio::ip::address_v6{}, 0);
+	std::vector<nano::endpoint> result;
 	nano::lock_guard<std::mutex> lock (mutex);
 	for (auto & protocol : protocols)
 	{
 		if (protocol.external_port != 0)
 		{
-			result = nano::endpoint (protocol.external_address, protocol.external_port);
+			result.push_back (nano::endpoint (protocol.external_address, protocol.external_port));
 		}
 	}
 	return result;
