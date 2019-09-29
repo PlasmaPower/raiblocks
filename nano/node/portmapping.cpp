@@ -58,6 +58,7 @@ nano::endpoint nano::port_mapping::external_address ()
 		if (protocol.external_port != 0)
 		{
 			result = nano::endpoint (protocol.external_address, protocol.external_port);
+			break;
 		}
 	}
 	return result;
